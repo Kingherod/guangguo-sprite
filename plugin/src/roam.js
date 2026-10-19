@@ -33,7 +33,7 @@ const dirOf = (n) => (n > 0 ? 1 : n < 0 ? -1 : 0);
  * @param {() => void} [opts.onSettle]                   落定/停顿后回调（存位置用）
  * @param {() => number} [opts.now]
  */
-function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettle = () => {}, now = () => Date.now(), size, rng = Math.random }) {
+function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettle = () => {}, now = () => Date.now(), size, loopMs = 1600, rng = Math.random }) {
   const rand = (min, max) => min + rng() * (max - min);
   let phase = 'pause';
   let pauseUntil = 0;
@@ -46,9 +46,12 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
   let ticks = 0, lastDt = 0, plans = 0, since = 0;
   /** 当前落脚线（虚拟台面）：松手时定在落点下方一小段，永远不高于工作区底边 */
   let shelfY = null;
+  /** 走路用浮点位置累加，否则每帧四舍五入会把亚像素吃掉、倍率失效 */
+  let walkX = 0;
   let dragging = false;
   let busy = false;
   let enabled = true;
+  let speed = 1;
 
   const dims = () => (typeof size === 'function' ? size() : size);
   const floorY = () => {
@@ -102,6 +105,7 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
         return;
       }
       phase = 'walk';
+      walkX = b.x;
       signal(dirOf(targetX - b.x) > 0 ? 'running-right' : 'running-left');
       return;
     }
@@ -125,14 +129,17 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
     }
 
     if (phase === 'walk') {
-      const speed = (dims().width * STRIDE_PER_LOOP) / 1.6; // 一个图集循环 = 1600ms
-      const step = speed * dt;
-      const remain = targetX - b.x;
+      // 一个图集循环 = loopMs；走路 = 每循环 0.8 个身宽 × 速度倍率
+      const pxPerSec = (dims().width * STRIDE_PER_LOOP * speed) / ((typeof loopMs === 'function' ? loopMs() : loopMs) / 1000);
+      const step = pxPerSec * dt;
+      const remain = targetX - walkX;
       if (Math.abs(remain) <= Math.max(1.5, step)) {
-        moveTo(targetX, b.y);
+        walkX = targetX;
+        moveTo(walkX, b.y);
         settle(b.y);
       } else {
-        moveTo(Math.round(b.x + Math.sign(remain) * step), b.y);
+        walkX += Math.sign(remain) * step;
+        moveTo(Math.round(walkX), b.y);
       }
       return;
     }
@@ -169,6 +176,16 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
     setEnabled(v) {
       enabled = !!v;
       if (!enabled) signal(null);
+    },
+    /** 走路速度倍率（同时作用于窗口位移；渲染层按同一倍率加速走路帧） */
+    setSpeed(v) {
+      speed = Math.max(0.2, Math.min(3, Number(v) || 1));
+    },
+    get speed() {
+      return speed;
+    },
+    get enabled() {
+      return enabled;
     },
     setBusy(v) {
       busy = !!v;

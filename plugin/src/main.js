@@ -27,6 +27,7 @@ function readAtlas(){
 }
 function defaultPosition(){const area=screen.getPrimaryDisplay().workArea;return {x:area.x+Math.max(0,area.width-W-24),y:area.y+Math.max(0,area.height-H-24)};}
 const SCALE_MIN=0.75, SCALE_MAX=2.5;
+function readRoamSpeed(){try{const s=JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));if(typeof s.roamSpeed==='number')return Math.max(0.2,Math.min(3,s.roamSpeed));}catch{}return 1;}
 function readRoam(){try{const s=JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));if(typeof s.roam==='boolean')return s.roam;}catch{}return true;}
 function readScale(){
   if(testing)return 2;
@@ -66,6 +67,7 @@ function refreshTray(){
     tray.setContextMenu(Menu.buildFromTemplate([
       {label: win&&win.isVisible()?'隐藏桌宠':'显示桌宠',click:toggleWindow},
       {label:'尺寸',submenu:sizeItems()},
+      {label:'漫游',submenu:roamItems()},
       {type:'separator'},
       {label:'退出',click:()=>{quitting=true;app.quit();}}
     ]));
@@ -96,6 +98,22 @@ ipcMain.on('pet:drag-move',(_event,delta)=>{
 });
 ipcMain.on('pet:drag-end',()=>{dragOrigin=undefined;if(roam)roam.endDrag();else savePosition();});
 ipcMain.on('pet:click',()=>{dragOrigin=undefined;roam?.hold();});
+const ROAM_PRESETS=[[0,'不移动'],[0.65,'慢'],[1,'标准（当前配速）'],[1.5,'快']];
+function roamItems(){
+  return ROAM_PRESETS.map(([value,label])=>({
+    label,type:'radio',
+    checked: value===0 ? !(roam&&roam.enabled) : !!(roam&&roam.enabled&&Math.abs(roam.speed-value)<0.01),
+    click:()=>applyRoam(value)
+  }));
+}
+function applyRoam(value){
+  if(roam){
+    if(value===0){roam.setEnabled(false);}else{roam.setEnabled(true);roam.setSpeed(value);}
+  }
+  atomic('settings.json',{scale,roam:value!==0,roamSpeed:value===0?readRoamSpeed():value});
+  if(win&&!win.isDestroyed())win.webContents.send('pet:speed',value===0?0:value);
+  refreshTray();
+}
 function sizeItems(){
   return [[0.75,'75%'],[1,'100%'],[1.5,'150%'],[2,'200%'],[2.5,'250%']].map(([value,label])=>({label,type:'radio',checked:Math.abs(scale-value)<0.01,click:()=>applyScale(value)}));
 }
@@ -103,6 +121,7 @@ ipcMain.on('pet:menu',()=>{
   const sizes=sizeItems();
   Menu.buildFromTemplate([
     {label:'尺寸',submenu:sizes},
+    {label:'漫游',submenu:roamItems()},
     {type:'separator'},
     {label:'重新载入图集',click:()=>{try{readAtlas();atlasOk=false;win.webContents.send('pet:reload');}catch(error){fail(error);}}},
     {type:'separator'},
@@ -148,8 +167,10 @@ app.whenReady().then(()=>{
         onMotion:motion=>{if(win&&!win.isDestroyed())win.webContents.send('pet:motion',motion);},
         onSettle:savePosition
       });
+      roam.setSpeed(readRoamSpeed());
       roam.setEnabled(readRoam());
       roam.start();
+      win.webContents.on('did-finish-load',()=>{if(win&&!win.isDestroyed())win.webContents.send('pet:speed',readRoam()?readRoamSpeed():0);});
       createTray();
     }
     win.on('move',()=>{clearTimeout(positionTimer);positionTimer=setTimeout(savePosition,200);});
@@ -160,10 +181,11 @@ app.whenReady().then(()=>{
     commandTimer=setInterval(()=>{
       for(const name of fs.readdirSync(data).filter(n=>/^command-[\w-]+\.json$/.test(n))){
         const file=path.join(data,name);try{const command=JSON.parse(fs.readFileSync(file,'utf8'));if(command.done)continue;
-          if(command.action==='show'){show();const d=screen.getPrimaryDisplay();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,tray:!!tray,roam:roam?roam.phase:null,roamStats:roam?roam.stats:null,bounds:win.getBounds(),contentSize:win.getContentSize(),display:{bounds:d.bounds,workArea:d.workArea,scaleFactor:d.scaleFactor}}));}
+          if(command.action==='show'){show();const d=screen.getPrimaryDisplay();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,tray:!!tray,roam:roam?roam.phase:null,roamSpeed:roam?roam.speed:null,roamOn:roam?roam.enabled:null,roamStats:roam?roam.stats:null,bounds:win.getBounds(),contentSize:win.getContentSize(),display:{bounds:d.bounds,workArea:d.workArea,scaleFactor:d.scaleFactor}}));}
           else if(command.action==='scale'&&Number.isFinite(command.value)){applyScale(command.value);savePosition();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,width:W,height:H}));}
           else if(command.action==='roam'&&typeof command.enabled==='boolean'){if(roam)roam.setEnabled(command.enabled);atomic('settings.json',{scale,roam:command.enabled});fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),roam:command.enabled}));}
-          else if(command.action==='state'){fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),visible:win.isVisible(),tray:!!tray,roam:roam?roam.phase:null,roamStats:roam?roam.stats:null,bounds:win.getBounds(),scale}));}
+          else if(command.action==='state'){fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),visible:win.isVisible(),tray:!!tray,roam:roam?roam.phase:null,roamSpeed:roam?roam.speed:null,roamOn:roam?roam.enabled:null,roamStats:roam?roam.stats:null,bounds:win.getBounds(),scale}));}
+          else if(command.action==='roamSpeed'&&Number.isFinite(command.value)){applyRoam(command.value);fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),roamSpeed:command.value,enabled:!!(roam&&roam.enabled)}));}
           else if(command.action==='hide'){if(win)win.hide();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale}));}
           else if(command.action==='shot'){win.capturePage().then(img=>{const p=path.join(data,'shot.png');fs.writeFileSync(p,img.toPNG());fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,width:W,height:H,file:p}));}).catch(error=>{fs.writeFileSync(file,JSON.stringify({done:true,error:error.message}));});}
         }catch(error){console.error(error.message);}

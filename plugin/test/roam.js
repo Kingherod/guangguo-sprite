@@ -111,4 +111,21 @@ function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
   assert.equal(h.roam.phase, 'pause', '拖拽中保持 pause');
 }
 
+// 6. 速度倍率：同样 160ms 内的位移按倍率成比例
+{
+  const run = (mult) => {
+    const h = harness({ x: 200, y: FLOOR, rolls: [0.7, 0.999, 0.999] });
+    h.roam.setSpeed(mult);
+    h.advance(7000);                 // 跨过停顿，进入 walk
+    assert.equal(h.roam.phase, 'walk', `${mult}x 时应已走路`);
+    const x0 = h.pos.x;
+    h.advance(160);                  // 只量一小段，避免走到目标停下
+    return Math.abs(h.pos.x - x0);
+  };
+  const slow = run(0.65), normal = run(1), fast = run(1.5);
+  assert.ok(Math.abs(fast / normal - 1.5) < 0.12, `快速应≈1.5×：${fast}/${normal}`);
+  assert.ok(Math.abs(slow / normal - 0.65) < 0.12, `慢速应≈0.65×：${slow}/${normal}`);
+  console.log(`  速度实测（160ms 位移）: 慢 ${slow} / 标准 ${normal} / 快 ${fast} px`);
+}
+
 console.log('PASS roam: 小段下坠 / 底线夹紧 / 连续下拖 / 走路朝向 / 点击停顿 / 忙碌静止 / 拖拽让路');

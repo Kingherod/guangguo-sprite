@@ -92,7 +92,9 @@ createActivityWatcher({ roots, busyWindowMs, intervalMs }) → { start(), stop()
 分支（随机）：55% 停顿 / 30% 走到工作区内随机 x / 15% 原地起跳；离地时任何情况都先落到自己的落脚线。
 **落脚线随拖放改变**，连续下拖会逐段降低，但永远不低于工作区底边；重启后按 `position.json` 还原到同一高度。
 **忙碌（`busy`）或拖拽中一律不动**；姿态通过 `pet:motion` 通道压过状态机（`running-left|right`、`jumping`）。
-漫游开关存 `settings.json` 的 `roam`，命令文件 `{"action":"roam","enabled":false}` 可临时静音。
+**速度档位**（右键/托盘 → 漫游）：`不移动` / `慢 0.65×` / `标准 1.0×` / `快 1.5×`。
+倍率同时作用于**窗口位移**和**走路帧速**（`frameMs / 倍率`）——只加速度不加速动画会滑步。
+存 `settings.json`：`roam`(bool) + `roamSpeed`(0.2–3)，命令文件 `{"action":"roamSpeed","value":1.5}`（0 = 不移动）。
 
 ## 唤起（关掉了怎么找回来）
 

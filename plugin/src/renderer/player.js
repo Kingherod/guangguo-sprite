@@ -1,10 +1,12 @@
 'use strict';
 const canvas=document.getElementById('pet'), ctx=canvas.getContext('2d');
 const { inspect,drawFrame }=GuangguoAtlas;
-let image, atlas, model, raf, lastState='', lastPose='', stateStart=0, frame=0, lastStatus=0, pointer, clicks=0, motion=null;
+let image, atlas, model, raf, lastState='', lastPose='', stateStart=0, frame=0, lastStatus=0, pointer, clicks=0, motion=null, runSpeed=1;
 const pending=[];
 window.pet.activity(event => { if (model) model.activity(event); else pending.push(event); });
 window.pet.motion(next => { motion=next; lastPose=''; });
+// 漫游倍率：走路帧跟着一起加速/减速，否则快走会滑步
+window.pet.speed(value => { runSpeed = value>0 ? value : 1; lastPose=''; });
 function emitStatus(now, state) { if (now-lastStatus>200) { lastStatus=now; window.pet.status({ state,busy:model.busy,frame,atlasOk:true,clicks }); } }
 function animate(now) {
   const state=model.state();
@@ -14,7 +16,8 @@ function animate(now) {
   const pose=state==='waving'?'waving':(motion&&motion.row)?motion.row:(state==='unread'?'waiting':state);
   if (pose!==lastPose) { lastPose=pose; stateStart=now; }
   const row=atlas.rows.find(r=>r.name===pose)||atlas.rows[0];
-  frame=Math.floor((now-stateStart)/row.frameMs)%row.frames;
+  const stepMs = row.name.startsWith('running') ? row.frameMs/runSpeed : row.frameMs;
+  frame=Math.floor((now-stateStart)/stepMs)%row.frames;
   drawFrame(ctx,image,atlas,row.name,frame); emitStatus(now,state);
   raf=requestAnimationFrame(animate);
 }

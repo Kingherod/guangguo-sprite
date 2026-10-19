@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('pet', {
   activity: callback => ipcRenderer.on('pet:activity', (_event,state) => callback(state)),
   motion: callback => ipcRenderer.on('pet:motion', (_event,motion) => callback(motion)),
   click: () => ipcRenderer.send('pet:click'),
+  speed: callback => ipcRenderer.on('pet:speed', (_event,value) => callback(value)),
   reload: callback => ipcRenderer.on('pet:reload', () => callback()),
   dragStart: () => ipcRenderer.send('pet:drag-start'),
   dragMove: delta => ipcRenderer.send('pet:drag-move',delta),
