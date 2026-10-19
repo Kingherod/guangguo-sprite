@@ -198,7 +198,7 @@ def build(src_dir, out_dir, loop_ms=LOOP_MS, walk_dir=WALK_DIR):
         "waving":        ("wave.png", 3, 194, "wave.png", None),
         "jumping":       (None, 1, 190, "jump.png", None),
         "failed":        ("fail.png", 2, 184, "fail.png", None),
-        "waiting":       ("wait.png", 2, 136, "idle.png", None),
+        "waiting":       ("wait.png", 2, 160, "idle.png", None),
         "running":       ("@walk", 0, 188, None, None),
         "review":        ("think.png", 3, 194, "idle.png", None),
     }
