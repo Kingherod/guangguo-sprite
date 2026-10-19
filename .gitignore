@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# build output
+out/
+scripts/out/
+*.tmp
+
+# OS / editor
+Thumbs.db
+.DS_Store
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# local
+.env

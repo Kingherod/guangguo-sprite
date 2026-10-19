@@ -1,0 +1,33 @@
+光国 / Guāngguó — artwork license
+=================================
+
+The character artwork in this repository — `pet/spritesheet.png`, everything under
+`sources/`, `previews/` and `docs/design-sheet.png` — is licensed under the
+Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0).
+
+You are free to:
+  • Share  — copy and redistribute the material in any medium or format
+  • Adapt  — remix, transform, and build upon the material
+
+Under the following terms:
+  • Attribution — you must give appropriate credit, provide a link to the license,
+                  and indicate if changes were made.
+  • NonCommercial — you may not use the material for commercial purposes.
+
+Suggested attribution (put it in your README, credits screen or app "about" box):
+
+    光国 / Guāngguó desktop pet artwork by 尼乾外道,
+    licensed under CC BY-NC 4.0. https://creativecommons.org/licenses/by-nc/4.0/
+
+Full license text: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+What "non-commercial" means in plain terms: personal projects, fan art, school
+work, open-source desktop pets, streaming with attribution — all fine. Selling it,
+bundling it into a paid product, or using it in advertising — not without asking.
+商用请先联系作者。
+
+The character is an original design; this project is not affiliated with, or
+derived from, any existing franchise.
+
+Note: the source code in `scripts/` and `demo/` is licensed separately under the
+MIT License — see LICENSE.

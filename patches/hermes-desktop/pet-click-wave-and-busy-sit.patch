@@ -1,0 +1,268 @@
+diff --git a/apps/desktop/src/components/pet/floating-pet.tsx b/apps/desktop/src/components/pet/floating-pet.tsx
+index f60d7c7cd2..f59a1f0465 100644
+--- a/apps/desktop/src/components/pet/floating-pet.tsx
++++ b/apps/desktop/src/components/pet/floating-pet.tsx
+@@ -13,6 +13,7 @@ import {
+   $petRoam,
+   $petRoamDir,
+   clearPetUnread,
++  flashPetActivity,
+   hasPetSpriteForMeta,
+   mergePetInfoMeta,
+   type PetInfo,
+@@ -127,7 +128,13 @@ export function FloatingPet() {
+   // Live drag offset (pointer → element top-left). Drag updates the DOM
+   // directly to avoid a React re-render (and canvas reflow) per pointermove —
+   // state is only committed on release.
+-  const dragRef = useRef<{ dx: number; dy: number; x: number; y: number } | null>(null)
++  const dragRef = useRef<{ dx: number; dy: number; startX: number; startY: number; x: number; y: number } | null>(
++    null
++  )
++
++  // A press that never really moved is a click, not a drag: the pet waves at you.
++  // 6px of slack covers a shaky hand and the pointer jitter of a plain tap.
++  const CLICK_SLOP_PX = 6
+ 
+   // Keep the *whole* pet on-screen at its current size, so growing it near an
+   // edge can't leave the window cropping it. Shared by drag + the reclamp effect.
+@@ -355,7 +362,14 @@ export function FloatingPet() {
+       return
+     }
+ 
+-    dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, x: rect.left, y: rect.top }
++    dragRef.current = {
++      dx: e.clientX - rect.left,
++      dy: e.clientY - rect.top,
++      startX: e.clientX,
++      startY: e.clientY,
++      x: rect.left,
++      y: rect.top
++    }
+     el.setPointerCapture(e.pointerId)
+     el.style.cursor = 'grabbing'
+   }, [])
+@@ -385,23 +399,36 @@ export function FloatingPet() {
+     [clamp, petW]
+   )
+ 
+-  const onPointerUp = useCallback((e: React.PointerEvent) => {
+-    const drag = dragRef.current
++  const onPointerUp = useCallback(
++    (e: React.PointerEvent) => {
++      const drag = dragRef.current
+ 
+-    if (drag) {
+-      dragRef.current = null
+-      const committed = { x: drag.x, y: drag.y }
+-      setPosition(committed)
+-      persistString(POSITION_KEY, JSON.stringify(committed))
+-    }
++      if (drag) {
++        dragRef.current = null
+ 
+-    const el = containerRef.current
++        const moved = Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY)
+ 
+-    if (el) {
+-      el.style.cursor = 'grab'
+-      el.releasePointerCapture?.(e.pointerId)
+-    }
+-  }, [])
++        if (moved < CLICK_SLOP_PX) {
++          // A tap, not a drag. The pet waves back — the `waving` row was drawn
++          // but had no trigger anywhere in the app. Run it for exactly one
++          // animation loop so the gesture never starts mid-cycle or gets cut off.
++          flashPetActivity({ justCompleted: true }, info.loopMs ?? 1100)
++        } else {
++          const committed = { x: drag.x, y: drag.y }
++          setPosition(committed)
++          persistString(POSITION_KEY, JSON.stringify(committed))
++        }
++      }
++
++      const el = containerRef.current
++
++      if (el) {
++        el.style.cursor = 'grab'
++        el.releasePointerCapture?.(e.pointerId)
++      }
++    },
++    [info.loopMs]
++  )
+ 
+   // Alt+wheel over the pet resizes it (persisted via the same path as the
+   // settings slider). Zoom toward the cursor — shift the top-left so the pixel
+diff --git a/apps/desktop/src/components/pet/pet-sprite.test.tsx b/apps/desktop/src/components/pet/pet-sprite.test.tsx
+index f7e418de06..9bb4db2e23 100644
+--- a/apps/desktop/src/components/pet/pet-sprite.test.tsx
++++ b/apps/desktop/src/components/pet/pet-sprite.test.tsx
+@@ -4,18 +4,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+ vi.mock('@/store/pet', () => {
+   const listeners = new Set<(state: string) => void>()
+ 
+-  return {
+-    $petState: {
+-      get: () => 'idle',
+-      listen: (callback: (state: string) => void) => {
+-        listeners.add(callback)
+-
+-        return () => {
+-          listeners.delete(callback)
+-        }
++  // The sprite reads `$petPose` (semantic state with the busy `run` folded into
++  // the `waiting` sit); this suite only cares about RAF scheduling, so one stub
++  // serves both atoms — it stays parked on `idle` either way.
++  const stateStore = {
++    get: () => 'idle',
++    listen: (callback: (state: string) => void) => {
++      listeners.add(callback)
++
++      return () => {
++        listeners.delete(callback)
+       }
+     }
+   }
++
++  return {
++    $petPose: stateStore,
++    $petState: stateStore
++  }
+ })
+ 
+ import { reactRoot } from '@/test/react-root'
+diff --git a/apps/desktop/src/components/pet/pet-sprite.tsx b/apps/desktop/src/components/pet/pet-sprite.tsx
+index cd3436e3cc..817815024a 100644
+--- a/apps/desktop/src/components/pet/pet-sprite.tsx
++++ b/apps/desktop/src/components/pet/pet-sprite.tsx
+@@ -1,7 +1,7 @@
+ import { memo, useEffect, useMemo, useRef, useState } from 'react'
+ 
+ import { createRendererLoopPauseController } from '@/lib/renderer-loop-pause'
+-import { $petState, type PetInfo, type PetState } from '@/store/pet'
++import { $petPose, type PetInfo, type PetState } from '@/store/pet'
+ 
+ const DEFAULT_FRAME_W = 192
+ const DEFAULT_FRAME_H = 208
+@@ -160,7 +160,7 @@ interface PetSpriteProps {
+  */
+ function PetSpriteImpl({ info, zoom = 1, stateOverride, rowOverride, pauseWhenUnfocused = false }: PetSpriteProps) {
+   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+-  const stateRef = useRef<PetState>($petState.get())
++  const stateRef = useRef<PetState>($petPose.get())
+   const overrideRef = useRef<PetState | undefined>(stateOverride)
+   const rowOverrideRef = useRef<string | undefined>(rowOverride)
+   const kickAnimationRef = useRef<() => void>(() => undefined)
+@@ -221,7 +221,7 @@ function PetSpriteImpl({ info, zoom = 1, stateOverride, rowOverride, pauseWhenUn
+     }
+ 
+     // Track state via subscription, not a prop — no re-render on activity ticks.
+-    stateRef.current = $petState.get()
++    stateRef.current = $petPose.get()
+ 
+     let raf = 0
+     let wakeTimer = 0
+@@ -383,7 +383,7 @@ function PetSpriteImpl({ info, zoom = 1, stateOverride, rowOverride, pauseWhenUn
+ 
+     kickAnimationRef.current = kickAnimation
+ 
+-    const unsubState = $petState.listen(next => {
++    const unsubState = $petPose.listen(next => {
+       stateRef.current = next
+       kickAnimation()
+     })
+diff --git a/apps/desktop/src/store/pet.test.ts b/apps/desktop/src/store/pet.test.ts
+index f3add6f0bd..ccecfb6fe3 100644
+--- a/apps/desktop/src/store/pet.test.ts
++++ b/apps/desktop/src/store/pet.test.ts
+@@ -6,6 +6,7 @@ import {
+   $petActivity,
+   $petAtRest,
+   $petMotion,
++  $petPose,
+   $petState,
+   derivePetState,
+   flashPetActivity,
+@@ -152,3 +153,38 @@ describe('$petState reads the active runtime slice, not the $busy mirror (#84434
+     expect($petAtRest.get()).toBe(true)
+   })
+ })
++
++describe('$petPose folds the busy run cycle into the waiting sit', () => {
++  afterEach(() => {
++    $petActivity.set({})
++    $petMotion.set(null)
++  })
++
++  it('sits while a turn is in flight instead of jogging on the spot', () => {
++    // Steady flags only count mid-turn (`live` gates them), so `busy` is part
++    // of the real shape of this signal.
++    $petActivity.set({ busy: true, toolRunning: true })
++
++    expect($petState.get()).toBe('run')
++    expect($petPose.get()).toBe('waiting')
++  })
++
++  it('still runs when the pose comes from roaming, not from a busy turn', () => {
++    $petActivity.set({})
++    $petMotion.set('run')
++
++    expect($petState.get()).toBe('run')
++    expect($petPose.get()).toBe('run')
++  })
++
++  it('leaves every other pose untouched', () => {
++    $petActivity.set({ busy: true, reasoning: true })
++    expect($petPose.get()).toBe('review')
++
++    $petActivity.set({ awaitingInput: true })
++    expect($petPose.get()).toBe('waiting')
++
++    $petActivity.set({ celebrate: true })
++    expect($petPose.get()).toBe('jump')
++  })
++})
+diff --git a/apps/desktop/src/store/pet.ts b/apps/desktop/src/store/pet.ts
+index e009b8121c..e0e186ed33 100644
+--- a/apps/desktop/src/store/pet.ts
++++ b/apps/desktop/src/store/pet.ts
+@@ -196,7 +196,7 @@ export const setPetInfo = (info: PetInfo) => $petInfo.set(info)
+ function deriveLivePetState(activity: PetActivity, busy: boolean): PetState {
+   const live = activity.busy ?? busy
+ 
+-  return derivePetState({
++  const base = derivePetState({
+     busy: live,
+     awaitingInput: activity.awaitingInput,
+     // Steady flags only count mid-turn — ignore stale ones once at rest so an
+@@ -207,6 +207,13 @@ function deriveLivePetState(activity: PetActivity, busy: boolean): PetState {
+     justCompleted: activity.justCompleted,
+     celebrate: activity.celebrate
+   })
++
++  // A finished turn the user wasn't there to see (the unread "mail" hint) parks
++  // the mascot in the `waiting` pose until they come back — `waiting` otherwise
++  // only fires while an approval/clarify/connection card is on screen, which is
++  // rare enough that the row never shows. Focus clears the hint (see
++  // floating-pet's focus listener), and the pose drops back to idle with it.
++  return base === 'idle' && $petUnread.get() ? 'waiting' : base
+ }
+ 
+ /**
+@@ -264,3 +271,17 @@ export const $petState = computed(
+     return base === 'idle' && motion ? motion : base
+   }
+ )
++
++/**
++ * The pose the *sprite* plays, which is not always the semantic state.
++ *
++ * A busy turn resolves to `run`, i.e. the in-place run cycle — legs pumping while
++ * the mascot goes nowhere, which reads as jogging on the spot rather than "she's
++ * working on it". She sits and waits instead (`waiting`); it's the calm, correct
++ * read for a maid watching her master's work finish. `$petState` itself is left
++ * alone so the bubble keeps saying "heads down…" and the roam loop (which sets
++ * `$petMotion`) still walks.
++ */
++export const $petPose = computed([$petState, $petMotion], (state, motion): PetState =>
++  state === 'run' && !motion ? 'waiting' : state
++)
