@@ -1,9 +1,10 @@
 'use strict';
-const {app,BrowserWindow,ipcMain,Menu,screen,nativeImage}=require('electron');
+const {app,BrowserWindow,ipcMain,Menu,screen,nativeImage,Tray}=require('electron');
 const fs=require('node:fs');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const {createActivityWatcher}=require('./activity');
+const {createRoam}=require('./roam');
 const paths=require('./paths');
 const testIndex=process.argv.indexOf('--selftest'), testing=testIndex>=0;
 const output=testing?path.resolve(process.argv[testIndex+1]||path.join(__dirname,'..','out')):null;
@@ -13,7 +14,7 @@ app.commandLine.appendSwitch('disable-http-cache');
 app.commandLine.appendSwitch('disable-background-networking');
 const initialError=process.argv.includes('--error');
 if(!app.requestSingleInstanceLock({hostError:initialError}))app.exit(0);
-let win, watcher, commandTimer, dragOrigin, positionTimer, activity={busy:false,lastError:false,at:Date.now()}, config, atlasOk=false, finished=false;
+let win, tray, roam, watcher, commandTimer, dragOrigin, positionTimer, activity={busy:false,lastError:false,at:Date.now()}, config, atlasOk=false, finished=false, quitting=false;
 function atomic(name,value){const target=path.join(data,name),temp=target+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2));fs.renameSync(temp,target);}
 function fail(error){if(finished)return;finished=true;console.error(String(error.stack||error));app.exit(3);}
 function readAtlas(){
@@ -26,6 +27,7 @@ function readAtlas(){
 }
 function defaultPosition(){const area=screen.getPrimaryDisplay().workArea;return {x:area.x+Math.max(0,area.width-W-24),y:area.y+Math.max(0,area.height-H-24)};}
 const SCALE_MIN=0.75, SCALE_MAX=2.5;
+function readRoam(){try{const s=JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));if(typeof s.roam==='boolean')return s.roam;}catch{}return true;}
 function readScale(){
   if(testing)return 2;
   try{const s=JSON.parse(fs.readFileSync(path.join(data,'settings.json'),'utf8'));if(Number.isFinite(s.scale))return Math.min(SCALE_MAX,Math.max(SCALE_MIN,s.scale));}catch{}
@@ -51,22 +53,53 @@ function position(){try{const p=JSON.parse(fs.readFileSync(path.join(data,'posit
 function savePosition(){if(win&&!win.isDestroyed()){const [x,y]=win.getPosition();atomic('position.json',{x,y});}}
 function sendActivity(){atomic('activity.json',activity);if(win&&!win.isDestroyed())win.webContents.send('pet:activity',activity);}
 function hostError(){activity={...activity,lastError:true,at:Date.now()};sendActivity();}
-function show(){if(win&&!win.isDestroyed()){if(win.isMinimized())win.restore();win.show();win.moveTop();win.focus();}}
+function show(){if(win&&!win.isDestroyed()){if(win.isMinimized())win.restore();win.show();win.moveTop();win.focus();roam?.setEnabled(true);}}
+function toggleWindow(){
+  if(!win||win.isDestroyed())return;
+  if(win.isVisible()){win.hide();roam?.setEnabled(false);}
+  else show();
+  if(tray)refreshTray();
+}
+function refreshTray(){
+  if(!tray)return;
+  try{
+    tray.setContextMenu(Menu.buildFromTemplate([
+      {label: win&&win.isVisible()?'隐藏桌宠':'显示桌宠',click:toggleWindow},
+      {label:'尺寸',submenu:sizeItems()},
+      {type:'separator'},
+      {label:'退出',click:()=>{quitting=true;app.quit();}}
+    ]));
+  }catch(error){console.error('托盘菜单刷新失败：'+error.message);}
+}
+function createTray(){
+  try{
+    const icon=nativeImage.createFromPath(path.join(__dirname,'..','assets','tray.png'));
+    tray=new Tray(icon.isEmpty()?nativeImage.createEmpty():icon);
+    tray.setToolTip('光国 · 右键可换尺寸或退出');
+    tray.on('click',toggleWindow);
+    refreshTray();
+  }catch(error){console.error('托盘不可用（不影响桌宠）：'+error.message);}
+}
 app.on('second-instance',(_event,_argv,_cwd,extra)=>{if(extra.hostError)hostError();show();});
 ipcMain.handle('pet:config',()=>config);
 ipcMain.on('pet:fatal',(_event,error)=>fail(error));
 ipcMain.on('pet:ready',()=>{atlasOk=true;if(!testing){sendActivity();show();}});
 ipcMain.on('pet:status',(_event,status)=>{if(!testing)atomic('status.json',{state:status.state,busy:!!status.busy,frame:status.frame,clicks:status.clicks||0,atlasOk:atlasOk&&status.atlasOk,pid:process.pid,at:Date.now()});});
-ipcMain.on('pet:drag-start',()=>{if(win)dragOrigin=win.getPosition();});
+ipcMain.on('pet:drag-start',()=>{if(win)dragOrigin=win.getPosition();roam?.beginDrag();});
 ipcMain.on('pet:drag-move',(_event,delta)=>{if(win&&dragOrigin&&Number.isFinite(delta.x)&&Number.isFinite(delta.y))win.setPosition(Math.round(dragOrigin[0]+delta.x),Math.round(dragOrigin[1]+delta.y));});
-ipcMain.on('pet:drag-end',()=>{dragOrigin=undefined;savePosition();});
+ipcMain.on('pet:drag-end',()=>{dragOrigin=undefined;if(roam)roam.endDrag();else savePosition();});
+function sizeItems(){
+  return [[0.75,'75%'],[1,'100%'],[1.5,'150%'],[2,'200%'],[2.5,'250%']].map(([value,label])=>({label,type:'radio',checked:Math.abs(scale-value)<0.01,click:()=>applyScale(value)}));
+}
 ipcMain.on('pet:menu',()=>{
-  const sizes=[[0.75,'75%'],[1,'100%'],[1.5,'150%'],[2,'200%'],[2.5,'250%']].map(([value,label])=>({label,type:'radio',checked:Math.abs(scale-value)<0.01,click:()=>applyScale(value)}));
+  const sizes=sizeItems();
   Menu.buildFromTemplate([
     {label:'尺寸',submenu:sizes},
     {type:'separator'},
     {label:'重新载入图集',click:()=>{try{readAtlas();atlasOk=false;win.webContents.send('pet:reload');}catch(error){fail(error);}}},
-    {label:'退出',click:()=>app.quit()}
+    {type:'separator'},
+    {label:'隐藏到托盘',click:()=>{win.hide();roam?.setEnabled(false);refreshTray();}},
+    {label:'退出（彻底关闭）',click:()=>{quitting=true;app.quit();}}
   ]).popup({window:win});
 });
 ipcMain.handle('pet:selftest',async(_event,result)=>{
@@ -84,6 +117,12 @@ ipcMain.handle('pet:selftest',async(_event,result)=>{
     console.log('selftest exports: PASS');finished=true;setTimeout(()=>app.exit(0),50);return true;
   }catch(error){fail(error);return false;}
 });
+const singleInstance=app.requestSingleInstanceLock();
+if(!singleInstance){
+  quitting=true;
+  app.quit();
+}else{
+app.on('second-instance',()=>{show();});
 app.whenReady().then(()=>{
   try{
     readAtlas();const p=position();
@@ -92,16 +131,31 @@ app.whenReady().then(()=>{
     win.webContents.on('render-process-gone',(_event,details)=>fail('Renderer stopped: '+details.reason));
     win.webContents.on('did-fail-load',(_event,code,description)=>fail('Renderer load: '+code+' '+description));
     win.loadFile(path.join(__dirname,'renderer','index.html')).catch(fail);
+    if(!testing){
+      roam=createRoam({
+        size:()=>({width:W,height:H}),
+        readBounds:()=>{const [x,y]=win.getPosition();return {x,y};},
+        moveTo:(x,y)=>{if(win&&!win.isDestroyed())win.setPosition(Math.round(x),Math.round(y));},
+        workArea:()=>screen.getDisplayMatching(win.getBounds()).workArea,
+        onMotion:motion=>{if(win&&!win.isDestroyed())win.webContents.send('pet:motion',motion);},
+        onSettle:savePosition
+      });
+      roam.setEnabled(readRoam());
+      roam.start();
+      createTray();
+    }
     win.on('move',()=>{clearTimeout(positionTimer);positionTimer=setTimeout(savePosition,200);});
     if(testing){const timeout=setTimeout(()=>fail('Selftest timed out after 30 seconds'),30000);timeout.unref();return;}
     watcher=createActivityWatcher({roots:paths.roots(),busyWindowMs:8000,intervalMs:1000});
-    watcher.on(state=>{activity=state;sendActivity();});watcher.start();
+    watcher.on(state=>{activity=state;roam?.setBusy(!!state.busy);sendActivity();});watcher.start();
     if(initialError)setTimeout(hostError,300);
     commandTimer=setInterval(()=>{
       for(const name of fs.readdirSync(data).filter(n=>/^command-[\w-]+\.json$/.test(n))){
         const file=path.join(data,name);try{const command=JSON.parse(fs.readFileSync(file,'utf8'));if(command.done)continue;
-          if(command.action==='show'){show();const d=screen.getPrimaryDisplay();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,bounds:win.getBounds(),contentSize:win.getContentSize(),display:{bounds:d.bounds,workArea:d.workArea,scaleFactor:d.scaleFactor}}));}
+          if(command.action==='show'){show();const d=screen.getPrimaryDisplay();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,tray:!!tray,roam:roam?roam.phase:null,roamStats:roam?roam.stats:null,bounds:win.getBounds(),contentSize:win.getContentSize(),display:{bounds:d.bounds,workArea:d.workArea,scaleFactor:d.scaleFactor}}));}
           else if(command.action==='scale'&&Number.isFinite(command.value)){applyScale(command.value);savePosition();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,width:W,height:H}));}
+          else if(command.action==='roam'&&typeof command.enabled==='boolean'){if(roam)roam.setEnabled(command.enabled);atomic('settings.json',{scale,roam:command.enabled});fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),roam:command.enabled}));}
+          else if(command.action==='state'){fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),visible:win.isVisible(),tray:!!tray,roam:roam?roam.phase:null,roamStats:roam?roam.stats:null,bounds:win.getBounds(),scale}));}
           else if(command.action==='hide'){if(win)win.hide();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale}));}
           else if(command.action==='shot'){win.capturePage().then(img=>{const p=path.join(data,'shot.png');fs.writeFileSync(p,img.toPNG());fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,width:W,height:H,file:p}));}).catch(error=>{fs.writeFileSync(file,JSON.stringify({done:true,error:error.message}));});}
         }catch(error){console.error(error.message);}
@@ -109,5 +163,6 @@ app.whenReady().then(()=>{
     },200);
   }catch(error){fail(error);}
 });
-app.on('before-quit',()=>{watcher?.stop();clearInterval(commandTimer);clearTimeout(positionTimer);if(!testing){savePosition();try{fs.unlinkSync(path.join(data,'status.json'));}catch{}}});
-app.on('window-all-closed',()=>app.quit());
+app.on('before-quit',()=>{quitting=true;roam?.stop();watcher?.stop();clearInterval(commandTimer);clearTimeout(positionTimer);if(!testing){savePosition();try{fs.unlinkSync(path.join(data,'status.json'));}catch{}}});
+app.on('window-all-closed',()=>{if(quitting||!tray)app.quit();});
+}

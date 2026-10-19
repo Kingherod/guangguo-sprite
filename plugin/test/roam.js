@@ -1,0 +1,80 @@
+'use strict';
+/**
+ * roam.js 的确定性测试：假时钟 + 假窗口 + 可控随机数。
+ * 覆盖四件事：落地、拖起后下落、走路位移与朝向、忙碌时不乱动。
+ */
+const assert = require('node:assert');
+const { createRoam } = require('../src/roam');
+
+const AREA = { x: 0, y: 0, width: 1440, height: 860 };
+const W = 192, H = 208;
+const FLOOR = AREA.height - H; // 652
+
+function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
+  let clock = 0;
+  const pos = { x, y };
+  const motions = [];
+  let i = 0;
+  const rng = () => rolls[Math.min(i++, rolls.length - 1)];
+  const roam = createRoam({
+    size: () => ({ width: W, height: H }),
+    readBounds: () => ({ ...pos }),
+    moveTo: (nx, ny) => { pos.x = nx; pos.y = ny; },
+    workArea: () => AREA,
+    onMotion: (m) => motions.push(m ? m.row : null),
+    now: () => clock,
+    rng
+  });
+  const advance = (ms, step = 16) => { for (let t = 0; t < ms; t += step) { clock += step; roam.tick(); } };
+  return { roam, pos, motions, advance, at: () => clock };
+}
+
+// 1. 悬空松手 → 自由落体回到地面
+{
+  const h = harness({ y: 120 });
+  h.roam.endDrag();
+  assert.equal(h.roam.phase, 'fall', '松手且离地时应进入 fall');
+  assert.equal(h.motions.at(-1), 'jumping', '下落时用跳姿');
+  h.advance(2000);
+  assert.equal(h.pos.y, FLOOR, `应落在 ${FLOOR}，实际 ${h.pos.y}`);
+  assert.equal(h.roam.phase, 'pause', '落地后回到 pause');
+}
+
+// 2. 贴地松手 → 不摔
+{
+  const h = harness({ y: FLOOR });
+  h.roam.endDrag();
+  assert.notEqual(h.roam.phase, 'fall', '贴地松手不该触发下落');
+}
+
+// 3. 走路：向目标位移、用对应朝向、到达后停下
+{
+  const h = harness({ x: 200, y: FLOOR, rolls: [0.7, 0.95, 0.95] });
+  h.advance(7000); // 跨过第一次停顿
+  assert.equal(h.roam.phase, 'walk', `应进入 walk，实际 ${h.roam.phase}`);
+  const dir = h.pos.x > 200 ? 'running-right' : 'running-left';
+  assert.ok(h.motions.includes(dir), `应发出 ${dir}，实际 ${h.motions.slice(-3)}`);
+  const startX = h.pos.x;
+  h.advance(3000);
+  assert.notEqual(h.pos.x, startX, '走路过程中 x 应变化');
+  assert.ok(h.pos.x >= 0 && h.pos.x <= AREA.width - W, '不应走出工作区');
+}
+
+// 4. 忙碌时不动
+{
+  const h = harness({ x: 300, y: FLOOR });
+  h.roam.setBusy(true);
+  const before = { ...h.pos };
+  h.advance(9000);
+  assert.deepEqual(h.pos, before, '忙碌时应原地不动');
+}
+
+// 5. 拖拽期间完全让路
+{
+  const h = harness({ x: 300, y: FLOOR });
+  h.roam.beginDrag();
+  h.advance(6000);
+  assert.equal(h.roam.phase, 'pause', '拖拽中保持 pause');
+}
+
+console.log('PASS roam: 落地 / 松手下落 / 走路朝向 / 忙碌静止 / 拖拽让路');

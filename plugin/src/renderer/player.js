@@ -1,14 +1,18 @@
 'use strict';
 const canvas=document.getElementById('pet'), ctx=canvas.getContext('2d');
 const { inspect,drawFrame }=GuangguoAtlas;
-let image, atlas, model, raf, lastState='', stateStart=0, frame=0, lastStatus=0, pointer, clicks=0;
+let image, atlas, model, raf, lastState='', lastPose='', stateStart=0, frame=0, lastStatus=0, pointer, clicks=0, motion=null;
 const pending=[];
 window.pet.activity(event => { if (model) model.activity(event); else pending.push(event); });
+window.pet.motion(next => { motion=next; lastPose=''; });
 function emitStatus(now, state) { if (now-lastStatus>200) { lastStatus=now; window.pet.status({ state,busy:model.busy,frame,atlasOk:true,clicks }); } }
 function animate(now) {
   const state=model.state();
-  if (state!==lastState) { lastState=state; stateStart=now; }
-  const row=atlas.rows.find(r=>r.name===(state==='unread'?'waiting':state));
+  if (state!==lastState) { lastState=state; }
+  // 漫游信号（走路/跳跃/下落）压过状态机的姿态；两者共用同一条时间轴，切姿态时归零。
+  const pose=(motion&&motion.row)?motion.row:(state==='unread'?'waiting':state);
+  if (pose!==lastPose) { lastPose=pose; stateStart=now; }
+  const row=atlas.rows.find(r=>r.name===pose)||atlas.rows[0];
   frame=Math.floor((now-stateStart)/row.frameMs)%row.frames;
   drawFrame(ctx,image,atlas,row.name,frame); emitStatus(now,state);
   raf=requestAnimationFrame(animate);
