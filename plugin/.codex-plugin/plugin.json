@@ -1,0 +1,11 @@
+{
+  "name": "guangguo",
+  "version": "1.0.0",
+  "description": "离线光国桌宠：会话活跃感知、挥手、拖动与未读提醒",
+  "interface": {
+    "displayName": "光国",
+    "category": "productivity",
+    "brandColor": "#F2C94C"
+  },
+  "mcpServers": "./.mcp.json"
+}

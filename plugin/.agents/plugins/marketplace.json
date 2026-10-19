@@ -1,0 +1,15 @@
+{
+  "name": "guangguo-local",
+  "interface": {
+    "displayName": "光国本地插件"
+  },
+  "plugins": [
+    {
+      "name": "guangguo",
+      "source": {
+        "source": "local",
+        "path": "./"
+      }
+    }
+  ]
+}

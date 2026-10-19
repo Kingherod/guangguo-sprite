@@ -65,6 +65,28 @@ python verify_atlas.py ../out/spritesheet.png ../out/row
 `pet/spritesheet.png` **byte for byte** (md5 `bb63c2b4d639c3a48289a822e02c9b42`).
 That's the check to run after you touch anything.
 
+## Ready-to-run pet plugin (optional)
+
+`plugin/` is a standalone desktop pet that plays this spritesheet — the same behaviour as the
+original Hermes build (idle / walking / waving on click / sitting while an agent is busy / failure
+state), without depending on any host app.
+
+```bash
+cd plugin
+node src/launch.js          # run it
+node src/selftest.js out/   # regenerate the five state screenshots + frame strip
+```
+
+- **Size**: right-click → 尺寸 → 75% / 100% / 150% / 200% / 250% (default 100% = 192×208, saved to
+  `%APPDATA%\guangguo-pet\settings.json`)
+- **Dragging**: hold the left button and move; a click under 6 px is a wave, not a drag
+- **Busy detection**: only `mtime` of the session directories is read — never their contents
+- **No network**: the plugin makes no requests and ships no billing/auth code
+- **Requires** Node 20+ and an Electron binary (the launcher finds one; nothing is downloaded)
+
+It is also usable as a Codex / DeepSeek Harness plugin through `.codex-plugin/plugin.json` and
+`.mcp.json` (read-only tools `guangguo_status` and `guangguo_show`).
+
 ## Compatibility
 
 | Host | Works? | How |

@@ -63,6 +63,27 @@ python verify_atlas.py ../out/spritesheet.png ../out/row
 `build_atlas.py` 是确定性的：从 `sources/` 重建出的图集与 `pet/spritesheet.png`
 **逐字节相同**（md5 `bb63c2b4d639c3a48289a822e02c9b42`）。改完任何东西，跑这一条就知道有没有跑偏。
 
+## 可直接运行的桌宠插件（可选）
+
+`plugin/` 是一个独立桌宠程序，播放的就是本仓库这套图集——行为和 Hermes 版一致（待机 / 走路 /
+点击挥手 / agent 忙碌时坐等 / 出错状态），不依赖任何宿主软件。
+
+```bash
+cd plugin
+node src/launch.js          # 直接跑
+node src/selftest.js out/   # 重新生成五张状态截图和帧条
+```
+
+- **尺寸**：右键 → 尺寸 → 75% / 100% / 150% / 200% / 250%（默认 100% 即 192×208，记在
+  `%APPDATA%\guangguo-pet\settings.json`）
+- **拖动**：按住左键移动；位移小于 6px 算点击（挥手），不算拖动
+- **忙碌判定**：只读会话目录的 `mtime`，从不读内容
+- **不联网**：无任何网络请求，不含账单/鉴权代码
+- **依赖**：Node 20+ 和一个 Electron 可执行文件（启动器自己找，不下载）
+
+也能作为 Codex / DeepSeek Harness 插件运行，入口是 `.codex-plugin/plugin.json` 与 `.mcp.json`
+（只读工具 `guangguo_status`、`guangguo_show`）。
+
 ## 兼容性
 
 | 宿主 | 能不能用 | 怎么用 |

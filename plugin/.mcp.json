@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "guangguo": {
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/src/launch.js",
+        "--mcp"
+      ]
+    }
+  }
+}

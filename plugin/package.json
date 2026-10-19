@@ -1,0 +1,12 @@
+{
+  "name": "guangguo-pet",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline Guangguo desktop pet",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/launch.js",
+    "selftest": "node src/selftest.js out/",
+    "test": "node test/run.js"
+  }
+}
