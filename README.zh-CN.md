@@ -63,14 +63,31 @@ python verify_atlas.py ../out/spritesheet.png ../out/row
 `build_atlas.py` 是确定性的：从 `sources/` 重建出的图集与 `pet/spritesheet.png`
 **逐字节相同**（md5 `bb63c2b4d639c3a48289a822e02c9b42`）。改完任何东西，跑这一条就知道有没有跑偏。
 
-**给 Codex 的桌宠插件用**
+## 兼容性
+
+| 宿主 | 能不能用 | 怎么用 |
+|---|---|---|
+| **Hermes** 桌面端 | ✅ 原生 | `pet/` 整个丢进 `pets/guangguo/`。有状态联动：agent 干活时坐着等，点一下挥手 |
+| **Codex** 桌面端 | ✅ 经桌宠插件 | 把某个状态导成 APNG，再从插件素材库导入当角色（见下） |
+| **DeepSeek Harness** | ✅ 经**同一套**桌宠插件 | 路径完全一样——它读的就是同一份 `.agents/plugins/marketplace.json` |
+| 其它程序 | ✅ 自己接 | `demo/index.html` 的播放逻辑约 40 行 |
+
+Codex 和 DeepSeek Harness 答案一样，因为**桌宠是插件的功能，不是宿主的功能**：
+两者都加载 `.codex-plugin/plugin.json` + `.mcp.json` + `.agents/plugins/marketplace.json`，
+而桌宠窗口是插件自己开的 Electron 置顶窗。
+
+这些插件只收 `png / apng / gif`（单边 ≤4096、≤600 帧），所以 8 × 9 图集**不能直接拖进去**，
+要按状态导出：
 
 ```bash
-python scripts/export_apng.py ../pet/spritesheet.png waiting ../out/waiting.png --scale 2
+python scripts/export_apng.py pet/spritesheet.png waiting out/waiting.png --scale 2
+# → 384×416，8 帧，每帧 200ms，RGBA 半透明完整保留
 ```
 
-导出成透明 APNG 再从插件素材库导入。为什么不能直接给图集、为什么不用 GIF，
-见 [docs/compatibility.md](docs/compatibility.md)。
+用 APNG 不用 GIF，是因为发梢和袖口有约 17.5% 的半透明像素，GIF 的 1 位透明会糊出一圈白边。
+
+**插件做不到的**：它只播一张循环动图，不会因为宿主在干活就换姿势；状态联动的只有 Hermes。
+完整矩阵和核实依据见 [docs/compatibility.md](docs/compatibility.md)。
 
 ## 怎么做的
 

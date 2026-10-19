@@ -65,6 +65,33 @@ python verify_atlas.py ../out/spritesheet.png ../out/row
 `pet/spritesheet.png` **byte for byte** (md5 `bb63c2b4d639c3a48289a822e02c9b42`).
 That's the check to run after you touch anything.
 
+## Compatibility
+
+| Host | Works? | How |
+|---|---|---|
+| **Hermes** desktop | ✅ native | drop `pet/` into `pets/guangguo/`. State-driven: sits while the agent is busy, waves on click |
+| **Codex** desktop | ✅ via a pet plugin | export a state as APNG, import it as role media (below) |
+| **DeepSeek Harness** | ✅ via the **same** pet plugin | identical path — it reads the same `.agents/plugins/marketplace.json` |
+| anything else | ✅ manual | `demo/index.html` is ~40 lines of player logic |
+
+Codex and DeepSeek Harness give the same answer because **the pet is a plugin feature, not a host
+feature**: both hosts load `.codex-plugin/plugin.json` + `.mcp.json` + `.agents/plugins/marketplace.json`,
+and the pet window is an Electron window the plugin opens for itself.
+
+Those plugins accept `png / apng / gif` only (≤4096 px, ≤600 frames), so an 8 × 9 atlas cannot be dropped
+in — export one state instead:
+
+```bash
+python scripts/export_apng.py pet/spritesheet.png waiting out/waiting.png --scale 2
+# → 384×416, 8 frames @200 ms, RGBA preserved
+```
+
+APNG rather than GIF because the hair tips and sleeves are ~17.5 % semi-transparent pixels, and GIF's
+1-bit alpha would halo them white.
+
+**What the plugin cannot do**: it plays one looping image, so it will not react to the host being busy.
+Only Hermes has state-driven behaviour. Full matrix and evidence: [docs/compatibility.md](docs/compatibility.md).
+
 ## How it was made
 
 Character design, frame direction and all the "why" behind the choices are in
