@@ -9,7 +9,8 @@ function createActivityWatcher({ roots = [], busyWindowMs = 8000, intervalMs = 1
     for (const entry of entries) {
       const file = path.join(dir, entry.name);
       if (entry.isDirectory()) latest = Math.max(latest, await newest(file));
-      else if (entry.isFile() && /\.(jsonl|log)$/i.test(entry.name)) { try { latest = Math.max(latest, (await fs.stat(file)).mtimeMs); } catch {} }
+      // 允许后缀二次压缩：DeepSeek Harness 写的是 session.v4.jsonl.zstd
+      else if (entry.isFile() && /\.(jsonl|log)(\.[a-z0-9]+)?$/i.test(entry.name)) { try { latest = Math.max(latest, (await fs.stat(file)).mtimeMs); } catch {} }
     }
     return latest;
   }
