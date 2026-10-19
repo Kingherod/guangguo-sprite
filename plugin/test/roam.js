@@ -29,22 +29,43 @@ function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
   return { roam, pos, motions, advance, at: () => clock };
 }
 
-// 1. 悬空松手 → 自由落体回到地面
+// 1. 高处松手 → 只下坠一小段（身高 21% ≈ 44px）就站住，不再滑到底
 {
   const h = harness({ y: 120 });
   h.roam.endDrag();
   assert.equal(h.roam.phase, 'fall', '松手且离地时应进入 fall');
   assert.equal(h.motions.at(-1), 'jumping', '下落时用跳姿');
   h.advance(2000);
-  assert.equal(h.pos.y, FLOOR, `应落在 ${FLOOR}，实际 ${h.pos.y}`);
+  assert.equal(h.pos.y, 164, `应落在落点下 44px（164），实际 ${h.pos.y}`);
+  assert.notEqual(h.pos.y, FLOOR, '不该滑到底线');
   assert.equal(h.roam.phase, 'pause', '落地后回到 pause');
 }
 
-// 2. 贴地松手 → 不摔
+// 2. 贴底松手 → 不越过底线：落点+28 被夹到底边
+{
+  const h = harness({ y: FLOOR - 10 });
+  h.roam.endDrag();
+  h.advance(2000);
+  assert.equal(h.pos.y, FLOOR, `应夹到底线 ${FLOOR}，实际 ${h.pos.y}`);
+}
+
+// 2b. 已在地面松手 → 不摔
 {
   const h = harness({ y: FLOOR });
   h.roam.endDrag();
   assert.notEqual(h.roam.phase, 'fall', '贴地松手不该触发下落');
+}
+
+// 2c. 连续几次下拖，落脚线逐段下移但永不越过底线
+{
+  const h = harness({ y: 100 });
+  for (const dropY of [100, 200, 400, 640, 700]) {
+    h.pos.y = dropY;
+    h.roam.endDrag();
+    h.advance(1500);
+    assert.ok(h.pos.y <= FLOOR, `第 ${dropY} 次落点越界: ${h.pos.y}`);
+    assert.ok(h.pos.y === Math.min(FLOOR, dropY + 44), `第 ${dropY} 次落点错误: ${h.pos.y}`);
+  }
 }
 
 // 3. 走路：向目标位移、用对应朝向、到达后停下
@@ -57,6 +78,7 @@ function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
   const startX = h.pos.x;
   h.advance(3000);
   assert.notEqual(h.pos.x, startX, '走路过程中 x 应变化');
+  assert.equal(h.pos.y, FLOOR, '走路不该改变落脚高度');
   assert.ok(h.pos.x >= 0 && h.pos.x <= AREA.width - W, '不应走出工作区');
 }
 
@@ -77,4 +99,4 @@ function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
   assert.equal(h.roam.phase, 'pause', '拖拽中保持 pause');
 }
 
-console.log('PASS roam: 落地 / 松手下落 / 走路朝向 / 忙碌静止 / 拖拽让路');
+console.log('PASS roam: 小段下坠 / 底线夹紧 / 连续下拖 / 走路朝向 / 忙碌静止 / 拖拽让路');

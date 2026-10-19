@@ -16,6 +16,8 @@ const JUMP_DUR_MS = 460;
 const HOP_HEIGHT = 26;
 const STRIDE_PER_LOOP = 0.8;
 const DROP_SETTLE_MS = 90;
+/** 松手后只下坠这么一小段就"站住"：占身高 21%（208px 时约 44px），随尺寸等比放大 */
+const DROP_RATIO = 0.21;
 const MAX_DT_S = 0.05;
 const TICK_MS = 16;
 
@@ -42,6 +44,8 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
   let last = 0;
   let timer = null;
   let ticks = 0, lastDt = 0, plans = 0, since = 0;
+  /** 当前落脚线（虚拟台面）：松手时定在落点下方一小段，永远不高于工作区底边 */
+  let shelfY = null;
   let dragging = false;
   let busy = false;
   let enabled = true;
@@ -53,6 +57,11 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
   };
   const signal = (row) => onMotion(row ? { row } : null);
 
+  /** 硬底线：工作区底边，任何情况下都不可越过 */
+  const groundY = () => {
+    if (shelfY === null) shelfY = Math.min(floorY(), readBounds().y);
+    return Math.min(shelfY, floorY());
+  };
   const settle = (y) => {
     const b = readBounds();
     moveTo(b.x, y);
@@ -65,7 +74,7 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
   const plan = () => {
     plans += 1; since = now();
     const b = readBounds();
-    const floor = floorY();
+    const floor = groundY();
     if (b.y < floor - 1) {
       // 被拖到空中 / 地面抬高：先摔下来
       phase = 'fall';
@@ -139,7 +148,7 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
     if (phase === 'fall') {
       vy += GRAVITY_PX_S2 * dt;
       const y = b.y + vy * dt;
-      const floor = floorY();
+      const floor = groundY();
       if (y >= floor) settle(floor);
       else moveTo(b.x, Math.round(y));
     }
@@ -180,7 +189,21 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
       last = now();
       pauseUntil = now() + DROP_SETTLE_MS;
       const b = readBounds();
-      if (b.y < floorY() - 1) {
+      const floor = floorY();
+      if (b.y > floor) {
+        // 兜底：被拖到屏幕外（或显示器变矮）时先拉回底线之上
+        shelfY = floor;
+        moveTo(b.x, floor);
+        phase = 'pause';
+        pauseUntil = now() + rand(2500, 6000);
+        signal(null);
+        onSettle();
+        return;
+      }
+      // 落点 + 一小段 = 新落脚线；贴底时收敛到底线，绝不越过
+      const drop = Math.round(dims().height * DROP_RATIO);
+      shelfY = Math.min(floor, b.y + drop);
+      if (shelfY > b.y + 1) {
         phase = 'fall';
         vy = 0;
         signal('jumping');
@@ -188,11 +211,15 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
         phase = 'pause';
       }
     },
+    /** 当前落脚线（调试/回执用） */
+    get shelf() {
+      return groundY();
+    },
     get phase() {
       return phase;
     },
     get stats() {
-      return { ticks, lastDt, plans, since, pauseFor: Math.round(pauseUntil - now()) };
+      return { ticks, lastDt, plans, since, shelf: Math.round(groundY()), pauseFor: Math.round(pauseUntil - now()) };
     },
     /** 单步推进：生产用 setInterval 驱动，测试用假时钟手动驱动 */
     tick

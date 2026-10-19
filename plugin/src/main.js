@@ -86,7 +86,14 @@ ipcMain.on('pet:fatal',(_event,error)=>fail(error));
 ipcMain.on('pet:ready',()=>{atlasOk=true;if(!testing){sendActivity();show();}});
 ipcMain.on('pet:status',(_event,status)=>{if(!testing)atomic('status.json',{state:status.state,busy:!!status.busy,frame:status.frame,clicks:status.clicks||0,atlasOk:atlasOk&&status.atlasOk,pid:process.pid,at:Date.now()});});
 ipcMain.on('pet:drag-start',()=>{if(win)dragOrigin=win.getPosition();roam?.beginDrag();});
-ipcMain.on('pet:drag-move',(_event,delta)=>{if(win&&dragOrigin&&Number.isFinite(delta.x)&&Number.isFinite(delta.y))win.setPosition(Math.round(dragOrigin[0]+delta.x),Math.round(dragOrigin[1]+delta.y));});
+ipcMain.on('pet:drag-move',(_event,delta)=>{
+  if(!win||!dragOrigin||!Number.isFinite(delta.x)||!Number.isFinite(delta.y))return;
+  // 拖到哪算哪，但：整只不许低于工作区底边，横向至少留 24px 在屏内
+  const area=screen.getDisplayMatching(win.getBounds()).workArea;
+  const x=Math.min(Math.max(dragOrigin[0]+delta.x,area.x-W+24),area.x+area.width-24);
+  const y=Math.min(Math.max(dragOrigin[1]+delta.y,area.y),area.y+area.height-H);
+  win.setPosition(Math.round(x),Math.round(y));
+});
 ipcMain.on('pet:drag-end',()=>{dragOrigin=undefined;if(roam)roam.endDrag();else savePosition();});
 function sizeItems(){
   return [[0.75,'75%'],[1,'100%'],[1.5,'150%'],[2,'200%'],[2.5,'250%']].map(([value,label])=>({label,type:'radio',checked:Math.abs(scale-value)<0.01,click:()=>applyScale(value)}));
