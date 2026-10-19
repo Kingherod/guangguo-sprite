@@ -91,6 +91,18 @@ function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
   assert.deepEqual(h.pos, before, '忙碌时应原地不动');
 }
 
+// 4b. 点击触发 hold()：走路中立刻停住，姿态交还状态机（挥手）
+{
+  const h = harness({ x: 200, y: FLOOR, rolls: [0.7, 0.95, 0.95] });
+  h.advance(7000);
+  assert.equal(h.roam.phase, 'walk', '先进入 walk');
+  h.roam.hold(1600);
+  assert.equal(h.roam.phase, 'pause', 'hold 后应立即停');
+  const x = h.pos.x;
+  h.advance(800);
+  assert.equal(h.pos.x, x, '挥手期间不应继续走');
+}
+
 // 5. 拖拽期间完全让路
 {
   const h = harness({ x: 300, y: FLOOR });
@@ -99,4 +111,4 @@ function harness({ x = 400, y = FLOOR, rolls = [0.9] } = {}) {
   assert.equal(h.roam.phase, 'pause', '拖拽中保持 pause');
 }
 
-console.log('PASS roam: 小段下坠 / 底线夹紧 / 连续下拖 / 走路朝向 / 忙碌静止 / 拖拽让路');
+console.log('PASS roam: 小段下坠 / 底线夹紧 / 连续下拖 / 走路朝向 / 点击停顿 / 忙碌静止 / 拖拽让路');

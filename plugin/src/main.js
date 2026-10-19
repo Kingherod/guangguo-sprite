@@ -95,6 +95,7 @@ ipcMain.on('pet:drag-move',(_event,delta)=>{
   win.setPosition(Math.round(x),Math.round(y));
 });
 ipcMain.on('pet:drag-end',()=>{dragOrigin=undefined;if(roam)roam.endDrag();else savePosition();});
+ipcMain.on('pet:click',()=>{dragOrigin=undefined;roam?.hold();});
 function sizeItems(){
   return [[0.75,'75%'],[1,'100%'],[1.5,'150%'],[2,'200%'],[2.5,'250%']].map(([value,label])=>({label,type:'radio',checked:Math.abs(scale-value)<0.01,click:()=>applyScale(value)}));
 }

@@ -211,6 +211,14 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
         phase = 'pause';
       }
     },
+    /** 用户点了一下：原地待着，别在挥手时继续走/跳（下落中则让它落地再停） */
+    hold(ms = 1600) {
+      pauseUntil = now() + ms;
+      if (phase !== 'fall') {
+        phase = 'pause';
+        signal(null);
+      }
+    },
     /** 当前落脚线（调试/回执用） */
     get shelf() {
       return groundY();

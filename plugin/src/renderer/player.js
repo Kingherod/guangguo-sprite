@@ -10,7 +10,8 @@ function animate(now) {
   const state=model.state();
   if (state!==lastState) { lastState=state; }
   // 漫游信号（走路/跳跃/下落）压过状态机的姿态；两者共用同一条时间轴，切姿态时归零。
-  const pose=(motion&&motion.row)?motion.row:(state==='unread'?'waiting':state);
+  // 点击挥手是用户动作，优先于漫游姿态（否则走路/跳落时挥手会被吞掉）
+  const pose=state==='waving'?'waving':(motion&&motion.row)?motion.row:(state==='unread'?'waiting':state);
   if (pose!==lastPose) { lastPose=pose; stateStart=now; }
   const row=atlas.rows.find(r=>r.name===pose)||atlas.rows[0];
   frame=Math.floor((now-stateStart)/row.frameMs)%row.frames;
@@ -56,8 +57,14 @@ canvas.addEventListener('pointermove',e=>{
 canvas.addEventListener('pointerup',e=>{
   if(!pointer||pointer.id!==e.pointerId)return;
   const moved=Math.max(pointer.max,Math.hypot(e.screenX-pointer.x,e.screenY-pointer.y));
-  window.pet.dragEnd(); canvas.releasePointerCapture(e.pointerId);
-  if(moved<6) { model.click(); lastState=''; clicks++; }
+  const dragged=pointer.drag||moved>=6;
+  canvas.releasePointerCapture(e.pointerId);
+  if(dragged){
+    window.pet.dragEnd();
+  }else{
+    // 纯点击：结束拖拽态（但不触发下落），交回挥手
+    model.click(); lastState=''; lastPose=''; clicks++; window.pet.click();
+  }
   pointer=undefined;
 });
 canvas.addEventListener('pointercancel',()=>{ pointer=undefined; window.pet.dragEnd(); });
