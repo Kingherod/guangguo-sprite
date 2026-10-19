@@ -100,7 +100,7 @@ app.whenReady().then(()=>{
     commandTimer=setInterval(()=>{
       for(const name of fs.readdirSync(data).filter(n=>/^command-[\w-]+\.json$/.test(n))){
         const file=path.join(data,name);try{const command=JSON.parse(fs.readFileSync(file,'utf8'));if(command.done)continue;
-          if(command.action==='show'){show();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,bounds:win.getBounds(),contentSize:win.getContentSize()}));}
+          if(command.action==='show'){show();const d=screen.getPrimaryDisplay();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,bounds:win.getBounds(),contentSize:win.getContentSize(),display:{bounds:d.bounds,workArea:d.workArea,scaleFactor:d.scaleFactor}}));}
           else if(command.action==='scale'&&Number.isFinite(command.value)){applyScale(command.value);savePosition();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,width:W,height:H}));}
           else if(command.action==='hide'){if(win)win.hide();fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale}));}
           else if(command.action==='shot'){win.capturePage().then(img=>{const p=path.join(data,'shot.png');fs.writeFileSync(p,img.toPNG());fs.writeFileSync(file,JSON.stringify({done:true,at:Date.now(),scale,width:W,height:H,file:p}));}).catch(error=>{fs.writeFileSync(file,JSON.stringify({done:true,error:error.message}));});}
