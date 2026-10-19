@@ -81,3 +81,13 @@ Hermes 的桌宠是宿主内建：`agent/pet/store.py` 自动发现 `pets/<slug>
 图集是纯 PNG + 一个 JSON，没有任何私有格式。任何能
 `drawImage(sheet, frame*192, row*208, 192, 208, ...)` 的引擎都能用，
 `docs/format.md` 里有可直接粘的 JS 播放器和帧数探测逻辑。
+
+## 会话目录（忙闲判定用）
+
+| 宿主 | 会话文件位置 | 后缀 |
+|---|---|---|
+| Codex | `~/.codex/sessions/<年>/<月>/<日>/rollout-*.jsonl` | `.jsonl` |
+| DeepSeek Harness | `~/.dsh/sessions/<workspace>/session-*/session.v4.jsonl.zstd` | `.jsonl.zstd` |
+
+插件只 `stat` 这些文件的 `mtime`，不读内容。**注意 dsh 的会话不在 `%APPDATA%\@deepseek-ai` 下**，
+早期版本只监控后者，导致 dsh 忙时桌宠不动；1.0.1 起两个根都监控，并且后缀允许二次压缩。
