@@ -1,12 +1,12 @@
 {
   "name": "guangguo-pet",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "private": true,
   "description": "Offline Guangguo desktop pet",
   "main": "src/main.js",
   "scripts": {
     "start": "node src/launch.js",
     "selftest": "node src/selftest.js out/",
-    "test": "node test/run.js && node test/roam.js"
+    "test": "node test/run.js && node test/roam.js && node test/codex-events.js && node test/codex-watcher.js"
   }
 }

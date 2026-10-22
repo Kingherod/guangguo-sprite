@@ -7,16 +7,17 @@
  * 在忙/闲之间翻转 **74 次** —— 坐着还没坐稳就弹回站立，思考态更是永远出不来。
  *
  * Codex 的 rollout jsonl（~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl）里有结构化事件：
- *   response_item.reasoning            → 模型推理中      → think（review 行）
- *   response_item.message(role=assistant) → 生成回答中    → think
+ *   response_item.reasoning               → 模型推理中      → think（review 行）
+ *   response_item.message(role=assistant) → 生成回答中      → think
  *   response_item.custom_tool_call / function_call → 跑工具 → tool（waiting 行）
- *   response_item.*_output             → 工具返回，等下一步 → 保持当前阶段
- *   event_msg.task_complete            → 一轮结束        → idle
+ *   response_item.*_output                → 工具返回，等下一步 → 保持当前阶段
+ *   event_msg.task_complete               → 一轮结束        → idle
  *
  * 本模块只做「文件 → 阶段」的翻译，不碰窗口、不碰渲染。
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 
 const PHASE = { THINK: 'think', TOOL: 'tool', IDLE: 'idle' };
 
@@ -69,20 +70,54 @@ function latestRollout(root) {
 }
 
 /**
+ * 事件自身的时刻（rollout 的 timestamp 是 ISO / UTC）。
+ * 用事件时间而不是「读到它的时间」：刚启动读到一小时前的旧会话时，
+ * 应立刻判空闲，而不是误以为「刚刚还在思考」。取不到才回落到现在。
+ */
+function eventTime(record) {
+  const raw = record && record.timestamp;
+  if (typeof raw === 'string') {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return Date.now();
+}
+
+/**
  * @param {object} opts
- * @param {string} opts.root           ~/.codex/sessions
+ * @param {string} opts.root          ~/.codex/sessions
  * @param {(phase:string, meta:object)=>void} opts.onPhase
  * @param {number} [opts.intervalMs]   轮询间隔（默认 500ms）
- * @param {number} [opts.idleAfterMs]  多久没有新事件就判 idle（默认 30s）
+ * @param {number} [opts.idleAfterMs]  多久没有新事件就判 idle（默认 300s —— 一次长推理可能几分钟不落新事件，
+ *                                    30s 会把「正在想」误判成「闲」）
+ * @param {number} [opts.scanEveryMs]  目录扫描间隔（默认 10s；47 个文件全量 stat 约 3.2ms，1s 扫一次不划算）
  */
-function createCodexEventWatcher({ root, onPhase, intervalMs = 500, idleAfterMs = 30000 } = {}) {
+function createCodexEventWatcher({
+  root,
+  onPhase,
+  intervalMs = 500,
+  idleAfterMs = 300000,
+  scanEveryMs = 10000,
+} = {}) {
   let timer = null;
-  let file = null;        // 当前跟踪的文件
-  let offset = 0;         // 已消费到的字节位置
-  let carry = '';         // 不完整的最后一行
+  let file = null;             // 当前跟踪的文件
   let phase = PHASE.IDLE;
-  let lastEventAt = 0;
+  let lastEventMs = 0;         // 最后一条事件自身的时刻
   let stopped = false;
+
+  // 每个文件独立游标：多会话并行时切来切去，各自续读，不整份重读、不互相重置
+  const cursors = new Map();   // file -> { offset, carry, decoder }
+  let newest = null;
+  let lastScan = 0;
+
+  function cursorFor(target) {
+    let cur = cursors.get(target);
+    if (!cur) {
+      cur = { offset: 0, carry: '', decoder: new StringDecoder('utf8') };
+      cursors.set(target, cur);
+    }
+    return cur;
+  }
 
   function emit(next, meta) {
     if (stopped) return;
@@ -91,10 +126,10 @@ function createCodexEventWatcher({ root, onPhase, intervalMs = 500, idleAfterMs 
     try { onPhase(next, meta); } catch (error) { console.error('[codex-events] onPhase 抛错:', error.message); }
   }
 
-  function consume(text) {
-    carry += text;
-    const lines = carry.split('\n');
-    carry = lines.pop() || '';          // 最后一段可能不完整，留到下次
+  function consume(cur, text) {
+    cur.carry += text;
+    const lines = cur.carry.split('\n');
+    cur.carry = lines.pop() || '';          // 最后一段可能不完整，留到下次
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -102,35 +137,35 @@ function createCodexEventWatcher({ root, onPhase, intervalMs = 500, idleAfterMs 
       try { record = JSON.parse(trimmed); } catch { continue; }
       const next = classify(record);
       if (!next) continue;
-      lastEventAt = Date.now();
-      emit(next, { at: lastEventAt, record: record.type + '/' + ((record.payload || {}).type || '') });
+      lastEventMs = Math.max(lastEventMs, eventTime(record));
+      emit(next, { at: lastEventMs, record: record.type + '/' + ((record.payload || {}).type || '') });
     }
   }
 
   function tick() {
     if (stopped) return;
-    const newest = latestRollout(root);
-    if (!newest) return;
 
-    if (!file || newest.file !== file) {
-      // 换了文件（新的一轮）：从头读
-      file = newest.file;
-      offset = 0;
-      carry = '';
+    const now = Date.now();
+    if (!newest || now - lastScan >= scanEveryMs) {
+      newest = latestRollout(root);
+      lastScan = now;
     }
+    if (!newest) return;
+    if (!file || newest.file !== file) file = newest.file;
 
+    const cur = cursorFor(file);
     let stat;
     try { stat = fs.statSync(file); } catch { return; }
-    if (stat.size < offset) { offset = 0; carry = ''; }   // 文件被重写/截断
-    if (stat.size > offset) {
+    if (stat.size < cur.offset) { cur.offset = 0; cur.carry = ''; }   // 文件被重写/截断
+    if (stat.size > cur.offset) {
       let fd;
       try {
         fd = fs.openSync(file, 'r');
-        const length = stat.size - offset;
+        const length = stat.size - cur.offset;
         const buffer = Buffer.allocUnsafe(length);
-        fs.readSync(fd, buffer, 0, length, offset);
-        offset = stat.size;
-        consume(buffer.toString('utf8'));
+        fs.readSync(fd, buffer, 0, length, cur.offset);
+        cur.offset = stat.size;
+        consume(cur, cur.decoder.write(buffer));   // 多字节字符跨读边界不会裂开
       } catch (error) {
         console.error('[codex-events] 读文件失败:', error.message);
       } finally {
@@ -138,7 +173,7 @@ function createCodexEventWatcher({ root, onPhase, intervalMs = 500, idleAfterMs 
       }
     }
 
-    if (phase !== PHASE.IDLE && lastEventAt && Date.now() - lastEventAt > idleAfterMs) {
+    if (phase !== PHASE.IDLE && lastEventMs && now - lastEventMs > idleAfterMs) {
       emit(PHASE.IDLE, { force: true, reason: 'no-event-' + idleAfterMs + 'ms' });
     }
   }
@@ -156,7 +191,10 @@ function createCodexEventWatcher({ root, onPhase, intervalMs = 500, idleAfterMs 
       if (timer) { clearInterval(timer); timer = null; }
     },
     current() { return phase; },
+    get stats() {
+      return { file, phase, lastEventMs, cursors: cursors.size };
+    },
   };
 }
 
-module.exports = { createCodexEventWatcher, classify, latestRollout, PHASE };
+module.exports = { createCodexEventWatcher, classify, latestRollout, eventTime, PHASE };

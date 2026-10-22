@@ -190,6 +190,9 @@ function createRoam({ readBounds, moveTo, workArea, onMotion = () => {}, onSettl
     setBusy(v) {
       busy = !!v;
       if (busy) {
+        // 下落中被判忙：tick 会因 busy 早退、重力不再积分 → 会冻在半空下不来。
+        // 先补完这段落地再 pause。
+        if (phase === 'fall') settle(groundY());
         phase = 'pause';
         signal(null);
       }

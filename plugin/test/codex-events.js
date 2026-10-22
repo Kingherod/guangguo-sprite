@@ -22,11 +22,11 @@ for (const [record, expected] of cases) {
   assert.equal(classify(record), expected, JSON.stringify(record));
 }
 
-// 2) 真实 rollout 回放：两种阶段都必须真的出现过
-const root = path.join(os.homedir(), '.codex', 'sessions');
-const newest = latestRollout(root);
-assert.ok(newest, '找不到 rollout 文件');
-const lines = fs.readFileSync(newest.file, 'utf8').split('\n').filter(Boolean);
+// 2) 回放固定 fixture（从真实会话里抽的 13 条事件）。
+// 不要读 ~/.codex 的最新文件：最新那个可能是一次纯问答，没有工具调用，断言会假失败。
+const fixture = path.join(__dirname, 'fixtures', 'rollout-sample.jsonl');
+assert.ok(fs.existsSync(fixture), '缺少 fixture: ' + fixture);
+const lines = fs.readFileSync(fixture, 'utf8').split('\n').filter(Boolean);
 const counts = { think: 0, tool: 0, idle: 0 };
 let first = null, last = null;
 for (const line of lines) {
@@ -38,7 +38,7 @@ for (const line of lines) {
   first = first || phase;
   last = phase;
 }
-console.log('回放样本:', path.basename(newest.file));
+console.log('回放样本: fixtures/rollout-sample.jsonl');
 console.log('  分类计数:', counts, '| 首个:', first, '| 末个:', last);
 assert.ok(counts.think > 0, 'think 阶段应出现');
 assert.ok(counts.tool > 0, 'tool 阶段应出现');
