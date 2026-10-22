@@ -7,8 +7,12 @@ class PetState {
     if (!event.busy && this.busy) this.unread=!this.attended;
     if (event.lastError && (!this.lastError || event.at !== this.lastErrorAt)) { this.failedUntil=now+15000; this.lastErrorAt=event.at; }
     this.lastError=event.lastError; this.busy=event.busy;
-    // Codex 事件层推来的语义阶段：'think' | 'tool' | 'idle'（未接事件源的宿主不传，保持 ''）
+    // Codex/DSH 事件层推来的语义阶段：'think' | 'tool' | 'idle'（未接事件源的宿主不传，保持 ''）
+    const wasActive = this.phase;
     if (event.phase !== undefined) this.phase = (!event.phase || event.phase === 'idle') ? '' : event.phase;
+    // 一轮结束（think/tool → idle）：站起来。
+    // 不这么做的话 unread 也被映射成 waiting，"正在干活"与"已经干完"是同一个姿势，人分不出来。
+    if (wasActive && !this.phase) this.attend();
   }
   attend() { this.attended=true; this.unread=false; }
   hover() { if (this.unread) this.attend(); }

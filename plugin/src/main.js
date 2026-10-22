@@ -17,7 +17,17 @@ app.commandLine.appendSwitch('disable-background-networking');
 const initialError=process.argv.includes('--error');
 if(!app.requestSingleInstanceLock({hostError:initialError}))app.exit(0);
 let win, tray, roam, watcher, codexWatcher, dshWatcher, commandTimer, dragOrigin, positionTimer, activity={busy:false,lastError:false,at:Date.now()}, config, atlasOk=false, finished=false, quitting=false;
-function atomic(name,value){const target=path.join(data,name),temp=target+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2));fs.renameSync(temp,target);}
+// Windows 上 rename 覆盖一个正被别的进程读取的文件会抛 EPERM/EBUSY。
+// 必须重试并降级为直接写，否则一次瞬时就锁死整条状态推送链（activity/status 全停）。
+function atomic(name,value){
+  const target=path.join(data,name),temp=target+'.tmp';let text;try{text=JSON.stringify(value,null,2);}catch{return;}
+  for(let i=0;i<3;i++){
+    try{fs.writeFileSync(temp,text);fs.renameSync(temp,target);return;}
+    catch{/* 被占用：稍后重试 */}
+  }
+  try{fs.writeFileSync(target,text);}catch{/* 最后兜底失败也不影响内存状态 */}
+  try{fs.unlinkSync(temp);}catch{}
+}
 function fail(error){if(finished)return;finished=true;console.error(String(error.stack||error));app.exit(3);}
 function readAtlas(){
   const atlasPath=path.join(__dirname,'..','assets','pet','spritesheet.png');
@@ -54,7 +64,8 @@ function applyScale(next){
 }
 function position(){try{const p=JSON.parse(fs.readFileSync(path.join(data,'position.json'),'utf8'));if(Number.isFinite(p.x)&&Number.isFinite(p.y)&&screen.getAllDisplays().some(({workArea:a})=>p.x>=a.x&&p.y>=a.y&&p.x+W<=a.x+a.width&&p.y+H<=a.y+a.height))return {x:Math.round(p.x),y:Math.round(p.y)};}catch{}return defaultPosition();}
 function savePosition(){if(win&&!win.isDestroyed()){const [x,y]=win.getPosition();atomic('position.json',{x,y});}}
-function sendActivity(){atomic('activity.json',activity);if(win&&!win.isDestroyed())win.webContents.send('pet:activity',activity);}
+// 先推 IPC 再落盘：写盘只是给外部探针看的，绝不能因为它失败让桌宠本体收不到状态。
+function sendActivity(){if(win&&!win.isDestroyed()){try{win.webContents.send('pet:activity',activity);}catch{}}try{atomic('activity.json',activity);}catch{}}
 function hostError(){activity={...activity,lastError:true,at:Date.now()};sendActivity();}
 function show(){if(win&&!win.isDestroyed()){if(win.isMinimized())win.restore();win.show();win.moveTop();win.focus();roam?.setEnabled(true);}}
 function toggleWindow(){

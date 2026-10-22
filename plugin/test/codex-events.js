@@ -51,9 +51,19 @@ assert.equal(s.state(101), 'review', 'think 应映射到 review（思考行）')
 s.activity({ busy: true, lastError: false, at: 2, phase: 'tool' }, 200);
 assert.equal(s.state(201), 'waiting', 'tool 应映射到 waiting（坐等行）');
 s.activity({ busy: true, lastError: false, at: 3, phase: 'idle' }, 300);
-assert.equal(s.state(301), 'waiting', 'phase 清空后回落到 busy → waiting');
+assert.equal(s.state(301), 'waiting', 'phase 清空后回落到 busy → waiting（8 秒窗口内还在收尾）');
 s.activity({ busy: false, lastError: false, at: 4, phase: 'idle' }, 400);
-assert.equal(s.state(401), 'unread', '无 busy 无 phase → unread（旧路径不变）');
+assert.equal(s.state(401), 'idle', '一轮结束后应站起来（attend 清掉 unread），不再停在坐等姿态');
+
+// 3b) 真完成场景：tool → idle，必须站起，不能退化成 unread/waiting
+const done = new PetState(1600);
+done.activity({ busy: true, lastError: false, at: 1, phase: 'tool' }, 100);
+assert.equal(done.state(101), 'waiting', '干活时坐着');
+done.activity({ busy: false, lastError: false, at: 2, phase: 'idle' }, 200);
+assert.equal(done.state(201), 'idle', 'task_complete → 站起来');
+
+// 3c) 用户没看就不该有未读：完成后再挂一会儿也还是站着
+assert.equal(done.state(9000), 'idle', '完成后长时间静止仍是 idle');
 
 // 4) 没接事件源的宿主（Hermes/DSH）：phase 不传，行为必须与改前一致
 const legacy = new PetState(1600);

@@ -13,6 +13,9 @@ scripts/out/
 # OS / editor
 Thumbs.db
 .DS_Store
+
+# 光国酱工作区：含本机路径与跨会话内部信件，不进公开仓库
+光国酱工作区/
 desktop.ini
 .idea/
 .vscode/
