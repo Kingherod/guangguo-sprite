@@ -13,9 +13,14 @@ const output=testing?path.resolve(process.argv[testIndex+1]||path.join(__dirname
 const data=testing?path.join(output,'runtime'):paths.dataDir();
 fs.mkdirSync(data,{recursive:true}); app.setPath('userData',path.join(data,'electron'));
 app.commandLine.appendSwitch('disable-http-cache');
+// 防御性：Intel Arc + 透明窗口的硬件合成在个别状态下会让 renderer 进程整个崩（进程级 crash，不是 JS 报错）。
+// 桌宠这种小窗口不需要 GPU 加速，直接走软件合成更稳。
+app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-background-networking');
 const initialError=process.argv.includes('--error');
-if(!app.requestSingleInstanceLock({hostError:initialError}))app.exit(0);
+const bootLog=(m)=>{try{fs.appendFileSync(path.join(process.env.TEMP||'.','guangguo-boot.log'),new Date().toISOString()+' ['+process.pid+'] '+m+'\n');}catch{}};
+bootLog('boot argv='+process.argv.slice(1).join(' '));
+if(!app.requestSingleInstanceLock({hostError:initialError})){bootLog('LOCK busy → exit');app.exit(0);}
 let win, tray, roam, watcher, codexWatcher, dshWatcher, commandTimer, dragOrigin, positionTimer, activity={busy:false,lastError:false,at:Date.now()}, config, atlasOk=false, finished=false, quitting=false;
 // Windows 上 rename 覆盖一个正被别的进程读取的文件会抛 EPERM/EBUSY。
 // 必须重试并降级为直接写，否则一次瞬时就锁死整条状态推送链（activity/status 全停）。
@@ -28,7 +33,7 @@ function atomic(name,value){
   try{fs.writeFileSync(target,text);}catch{/* 最后兜底失败也不影响内存状态 */}
   try{fs.unlinkSync(temp);}catch{}
 }
-function fail(error){if(finished)return;finished=true;console.error(String(error.stack||error));app.exit(3);}
+function fail(error){if(finished)return;finished=true;bootLog('FAIL '+String(error.stack||error));console.error(String(error.stack||error));app.exit(3);}
 function readAtlas(){
   const atlasPath=path.join(__dirname,'..','assets','pet','spritesheet.png');
   const buffer=fs.readFileSync(atlasPath);const img=nativeImage.createFromBuffer(buffer),size=img.getSize();
@@ -164,8 +169,10 @@ if(!singleInstance){
 }else{
 app.on('second-instance',()=>{show();});
 app.whenReady().then(()=>{
+  bootLog('ready');
   try{
     readAtlas();const p=position();
+    bootLog('atlas ok');
     win=new BrowserWindow({width:W,height:H,x:p.x,y:p.y,useContentSize:true,frame:false,transparent:true,alwaysOnTop:true,skipTaskbar:true,resizable:false,maximizable:false,fullscreenable:false,hasShadow:false,show:false,backgroundColor:'#00000000',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});
     win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',event=>event.preventDefault());
     win.webContents.on('render-process-gone',(_event,details)=>fail('Renderer stopped: '+details.reason));
