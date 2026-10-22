@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {pathToFileURL}=require('node:url');
 const {createActivityWatcher}=require('./activity');
+const {createCodexEventWatcher}=require('./codex-events');
 const {createRoam}=require('./roam');
 const paths=require('./paths');
 const testIndex=process.argv.indexOf('--selftest'), testing=testIndex>=0;
@@ -14,7 +15,7 @@ app.commandLine.appendSwitch('disable-http-cache');
 app.commandLine.appendSwitch('disable-background-networking');
 const initialError=process.argv.includes('--error');
 if(!app.requestSingleInstanceLock({hostError:initialError}))app.exit(0);
-let win, tray, roam, watcher, commandTimer, dragOrigin, positionTimer, activity={busy:false,lastError:false,at:Date.now()}, config, atlasOk=false, finished=false, quitting=false;
+let win, tray, roam, watcher, codexWatcher, commandTimer, dragOrigin, positionTimer, activity={busy:false,lastError:false,at:Date.now()}, config, atlasOk=false, finished=false, quitting=false;
 function atomic(name,value){const target=path.join(data,name),temp=target+'.tmp';fs.writeFileSync(temp,JSON.stringify(value,null,2));fs.renameSync(temp,target);}
 function fail(error){if(finished)return;finished=true;console.error(String(error.stack||error));app.exit(3);}
 function readAtlas(){
@@ -176,7 +177,19 @@ app.whenReady().then(()=>{
     win.on('move',()=>{clearTimeout(positionTimer);positionTimer=setTimeout(savePosition,200);});
     if(testing){const timeout=setTimeout(()=>fail('Selftest timed out after 30 seconds'),30000);timeout.unref();return;}
     watcher=createActivityWatcher({roots:paths.roots(),busyWindowMs:8000,intervalMs:1000});
-    watcher.on(state=>{activity=state;roam?.setBusy(!!state.busy);sendActivity();});watcher.start();
+    watcher.on(state=>{activity={...state,phase:activity.phase};roam?.setBusy(!!state.busy||!!(activity.phase&&activity.phase!=='idle'));sendActivity();});watcher.start();
+    // Codex 宿主：mtime 只能回答「有没有动」，答不出「在推理还是在跑工具」。
+    // 接 rollout 事件流，think → review（思考行）、tool → waiting（坐等行）。
+    // 没有 Codex 会话时 watcher 什么都不做，Hermes / DSH 宿主继续走上面的 mtime。
+    codexWatcher=createCodexEventWatcher({
+      root:path.join(app.getPath('home'),'.codex','sessions'),
+      onPhase:phase=>{
+        activity={...activity,phase,at:Date.now()};
+        roam?.setBusy(phase!=='idle'||!!activity.busy);
+        sendActivity();
+      }
+    });
+    codexWatcher.start();
     if(initialError)setTimeout(hostError,300);
     commandTimer=setInterval(()=>{
       for(const name of fs.readdirSync(data).filter(n=>/^command-[\w-]+\.json$/.test(n))){
@@ -193,6 +206,6 @@ app.whenReady().then(()=>{
     },200);
   }catch(error){fail(error);}
 });
-app.on('before-quit',()=>{quitting=true;roam?.stop();watcher?.stop();clearInterval(commandTimer);clearTimeout(positionTimer);if(!testing){savePosition();try{fs.unlinkSync(path.join(data,'status.json'));}catch{}}});
+app.on('before-quit',()=>{quitting=true;roam?.stop();watcher?.stop();codexWatcher?.stop();clearInterval(commandTimer);clearTimeout(positionTimer);if(!testing){savePosition();try{fs.unlinkSync(path.join(data,'status.json'));}catch{}}});
 app.on('window-all-closed',()=>{if(quitting||!tray)app.quit();});
 }
